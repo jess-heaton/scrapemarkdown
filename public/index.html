@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Scrape Markdown to Voiceflow</title>
+</head>
+<body>
+  <h1>Scrape Markdown to Voiceflow</h1>
+  <form id="scrapeForm" action="/scrape" method="POST">
+    <label for="url">URL to Scrape:</label><br>
+    <input type="text" id="url" name="url" placeholder="https://example.com" required><br><br>
+    
+    <label for="voiceflowApiKey">Voiceflow API Key:</label><br>
+    <input type="text" id="voiceflowApiKey" name="voiceflowApiKey" required><br><br>
+    
+    <label for="overwrite">Overwrite Existing Data (true/false):</label><br>
+    <input type="text" id="overwrite" name="overwrite" placeholder="true or false"><br><br>
+    
+    <label for="maxChunkSize">Max Chunk Size (500-1500):</label><br>
+    <input type="number" id="maxChunkSize" name="maxChunkSize" placeholder="1000"><br><br>
+    
+    <label for="tags">Tags (comma-separated):</label><br>
+    <input type="text" id="tags" name="tags" placeholder="tag1,tag2"><br><br>
+    
+    <button type="submit">Scrape and Upload</button>
+  </form>
+</body>
+</html>

@@ -12,6 +12,21 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+function cleanMarkdown(markdown) {
+  // Remove inline images
+  let cleaned = markdown.replace(/!\[.*?\]\(.*?\)/g, '');
+  // Remove image links (linked images)
+  cleaned = cleaned.replace(/\[!\[.*?\]\(.*?\)\]\(.*?\)/g, '');
+  // Remove iframes or other custom patterns
+  cleaned = cleaned.replace(/\[iframe\]\(.*?\)/g, '');
+  // Optional: Remove all markdown links if not needed
+  // cleaned = cleaned.replace(/\[.*?\]\(.*?\)/g, '');
+  // Clean up extra whitespace
+  cleaned = cleaned.replace(/\n{2,}/g, '\n\n').trim();
+  return cleaned;
+}
+
+
 app.post('/scrape', async (req, res) => {
   const { url, voiceflowApiKey, overwrite, maxChunkSize, tags } = req.body;
   
@@ -21,23 +36,43 @@ app.post('/scrape', async (req, res) => {
   
   try {
     // --- Step 1: Call Firecrawl API ---
-    // Replace this URL with the actual Firecrawl endpoint if different.
-    const firecrawlUrl = `https://api.firecrawl.dev/scrape?url=${encodeURIComponent(url)}`;
-    const firecrawlResponse = await fetch(firecrawlUrl);
+    const firecrawlUrl = 'https://api.firecrawl.dev/v1/scrape';
+    const firecrawlResponse = await fetch(firecrawlUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer fc-734c78692af444e79380460414146ceb`
+      },
+      body: JSON.stringify({
+        url: url,
+        formats: ["markdown", "html"]
+      })
+    });
+    
     if (!firecrawlResponse.ok) {
       throw new Error("Firecrawl API error: " + firecrawlResponse.statusText);
     }
-    // Assume Firecrawl returns HTML text (if it returns Markdown directly, you can skip conversion)
-    const firecrawlData = await firecrawlResponse.text();
     
-    // --- Step 2: Convert HTML to Markdown ---
-    const turndownService = new TurndownService();
-    const markdown = turndownService.turndown(firecrawlData);
+    const firecrawlResult = await firecrawlResponse.json();
     
-    // --- Step 3: Prepare file upload to Voiceflow ---
+    // Prefer the markdown output, but if it's not available, convert HTML to Markdown.
+    let finalMarkdown = firecrawlResult.data.markdown;
+    if (!finalMarkdown && firecrawlResult.data.html) {
+      const turndownService = new TurndownService();
+      finalMarkdown = turndownService.turndown(firecrawlResult.data.html);
+    }
+    
+    if (!finalMarkdown) {
+      throw new Error("No markdown or html content received from Firecrawl.");
+    }
+    
+    // --- Post-Process the Markdown ---
+    finalMarkdown = cleanMarkdown(finalMarkdown);
+    
+    // --- Step 2: Prepare file upload to Voiceflow ---
     const voiceflowEndpoint = "https://api.voiceflow.com/v1/knowledge-base/docs/upload";
     
-    // Construct query parameters if provided
+    // Build query parameters if provided
     let queryParams = [];
     if (overwrite) queryParams.push(`overwrite=${overwrite}`);
     if (maxChunkSize) queryParams.push(`maxChunkSize=${maxChunkSize}`);
@@ -45,27 +80,32 @@ app.post('/scrape', async (req, res) => {
     const queryString = queryParams.length > 0 ? '?' + queryParams.join('&') : '';
     const uploadUrl = voiceflowEndpoint + queryString;
     
+    // Generate a file name based on the URL hostname (e.g., example.com.txt)
+    let fileName = 'document.txt'; // fallback
+    try {
+      const parsedUrl = new URL(url);
+      fileName = parsedUrl.hostname + '.txt';
+    } catch (e) {
+      console.error("URL parsing error, using fallback filename:", e);
+    }
+    
     // Create an in-memory file using FormData
     const form = new FormData();
-    form.append('file', Buffer.from(markdown, 'utf-8'), {
-      filename: 'document.txt',
+    form.append('file', Buffer.from(finalMarkdown, 'utf-8'), {
+      filename: fileName,
       contentType: 'text/plain'
     });
     
-    // Optional: attach metadata (e.g., the source URL)
-    // form.append('metadata', JSON.stringify({ source: url }));
-    
-    // --- Step 4: Call Voiceflow API ---
+    // --- Step 3: Call Voiceflow API ---
     const voiceflowResponse = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
-        // Assuming Voiceflow requires the API key in an Authorization header.
-        'Authorization': `Bearer ${voiceflowApiKey}`
-        // Do NOT manually set Content-Type; FormData sets it (with boundary) automatically.
+        // Send Voiceflow API key directly, without the "Bearer " prefix.
+        'Authorization': voiceflowApiKey
       },
       body: form
     });
-    
+
     if (!voiceflowResponse.ok) {
       const errorText = await voiceflowResponse.text();
       throw new Error("Voiceflow API error: " + errorText);
